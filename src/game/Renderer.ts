@@ -1,11 +1,13 @@
 /** @format */
 
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
+import { Texture } from "@babylonjs/core/Materials/Textures/texture";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { Matrix, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { Scene } from "@babylonjs/core/scene";
+import roadTextureUrl from "../assets/road.jpg";
 import { Player } from "./Player";
 import { Track } from "./Track";
 
@@ -18,13 +20,11 @@ export class Renderer {
   private playerMesh: Mesh;
 
   private readonly visibleStrips = 100; // Number of strips to render ahead (halved since strips are longer)
-  private readonly stripDepth = 8; // Depth of each strip in world units (doubled)
-  private readonly curbWidth = 1.5; // Width of curb strips
-  private readonly roadEdge = 0.4; // Must match Player.ts roadEdge
+  private readonly stripDepth = 48; // Depth of each strip in world units (doubled)
+  private readonly curbWidth = 1; // Width of curb strips
+  private readonly roadEdge = 0.83; // Must match Player.ts roadEdge
 
-  // Colors for alternating strips
-  private readonly roadColor1 = new Color3(0.3, 0.3, 0.3); // Dark gray
-  private readonly roadColor2 = new Color3(0.35, 0.35, 0.35); // Slightly lighter
+  // Colors for curbs
   private readonly curbColor1 = new Color3(0.9, 0.1, 0.1); // Red
   private readonly curbColor2 = new Color3(0.95, 0.95, 0.95); // White
 
@@ -34,16 +34,25 @@ export class Renderer {
   }
 
   private createStripMeshPool(): void {
-    // Create road materials for alternating strips
-    const mat1 = new StandardMaterial("roadMat1", this.scene);
-    mat1.diffuseColor = this.roadColor1;
-    mat1.specularColor = Color3.Black();
+    // Create road material with texture
+    const roadMat = new StandardMaterial("roadMat", this.scene);
+    // Create texture without mipmaps for sharp rendering at distance
+    const roadTexture = new Texture(
+      roadTextureUrl,
+      this.scene,
+      false, // noMipmap - disable mipmapping for sharp textures
+      true // invertY
+    );
+    // Use nearest neighbor sampling for pixel-perfect sharpness
+    // roadTexture.updateSamplingMode(Texture.NEAREST_NEAREST);
+    // The texture is oriented up/down, so V scale controls repetition along the strip
+    roadTexture.uScale = 1;
+    roadTexture.vScale = 1;
+    roadMat.diffuseTexture = roadTexture;
+    roadMat.specularColor = Color3.Black();
 
-    const mat2 = new StandardMaterial("roadMat2", this.scene);
-    mat2.diffuseColor = this.roadColor2;
-    mat2.specularColor = Color3.Black();
-
-    this.stripMaterials = [mat1, mat2];
+    // Use same material for all strips (texture provides visual variety)
+    this.stripMaterials = [roadMat, roadMat];
 
     // Create curb materials for alternating curbs
     const curbMat1 = new StandardMaterial("curbMat1", this.scene);
@@ -161,8 +170,8 @@ export class Renderer {
   public update(player: Player): void {
     const playerStripIndex = player.currentStripIndex;
     const positionInStrip = player.positionInStrip;
-    const elevationScale = 2;
-    const curveScale = 0.03;
+    const elevationScale = 4;
+    const curveScale = 0.5;
 
     // Calculate player's current elevation by accumulating hill values
     let playerElevation = 0;
@@ -221,12 +230,6 @@ export class Renderer {
       // Calculate Z position relative to player
       const relativeZ = (i - positionInStrip) * this.stripDepth;
 
-      // Calculate X offset: player steering + curve offset
-      // curveX is already relative to player (player's position = 0)
-      const curveX = cumulativeCurveOffset;
-      const baseX = -player.xOffset * strip.width * 0.5 + curveX;
-      const stripY = cumulativeElevation - playerElevation;
-
       // Calculate tilt angle based on elevation change
       const tiltAngle = Math.atan2(elevationChange, this.stripDepth);
 
@@ -235,6 +238,18 @@ export class Renderer {
         Math.sqrt(
           this.stripDepth * this.stripDepth + elevationChange * elevationChange
         ) / this.stripDepth;
+
+      // Calculate X offset: player steering + curve offset
+      // curveX is already relative to player (player's position = 0)
+      const curveX = cumulativeCurveOffset;
+      const baseX = -player.xOffset * strip.width * 0.5 + curveX;
+
+      // Pivot compensation: strips rotate around center, but we position by near edge
+      // When tilted, the near edge drops down by sin(tilt) * scaledDepth/2
+      // Compensate by shifting the strip up so near edge lands at correct elevation
+      const pivotCompensation =
+        Math.sin(tiltAngle) * stretchFactor * (this.stripDepth / 2);
+      const stripY = cumulativeElevation - playerElevation + pivotCompensation;
 
       // Scale width based on track data
       const scaleX = strip.width / 50;
@@ -256,7 +271,7 @@ export class Renderer {
       // Left curb - apply same shear transform
       this.applyShearTransform(
         leftCurb,
-        new Vector3(baseX - curbOffset, stripY + 0.01, relativeZ),
+        new Vector3(baseX - curbOffset, stripY - 0.01, relativeZ),
         tiltAngle,
         shearAmount,
         1, // curb width is fixed
@@ -266,7 +281,7 @@ export class Renderer {
       // Right curb - apply same shear transform
       this.applyShearTransform(
         rightCurb,
-        new Vector3(baseX + curbOffset, stripY + 0.01, relativeZ),
+        new Vector3(baseX + curbOffset, stripY - 0.01, relativeZ),
         tiltAngle,
         shearAmount,
         1, // curb width is fixed

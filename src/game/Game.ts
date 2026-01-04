@@ -1,13 +1,15 @@
-import { Engine } from '@babylonjs/core/Engines/engine';
-import { Scene } from '@babylonjs/core/scene';
-import { FreeCamera } from '@babylonjs/core/Cameras/freeCamera';
-import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight';
-import { Vector3 } from '@babylonjs/core/Maths/math.vector';
-import { Color4 } from '@babylonjs/core/Maths/math.color';
-import { Track } from './Track';
-import { Player } from './Player';
-import { Input } from './Input';
-import { Renderer } from './Renderer';
+/** @format */
+
+import { FreeCamera } from "@babylonjs/core/Cameras/freeCamera";
+import { Engine } from "@babylonjs/core/Engines/engine";
+import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
+import { Color4 } from "@babylonjs/core/Maths/math.color";
+import { Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { Scene } from "@babylonjs/core/scene";
+import { Input } from "./Input";
+import { Player } from "./Player";
+import { Renderer } from "./Renderer";
+import { Track } from "./Track";
 
 export class Game {
   private engine: Engine;
@@ -43,13 +45,13 @@ export class Game {
     this.renderer = new Renderer(this.scene, this.track);
 
     // Handle window resize
-    window.addEventListener('resize', () => {
+    window.addEventListener("resize", () => {
       this.engine.resize();
     });
 
     // Toggle debug camera with F1
-    window.addEventListener('keydown', (e) => {
-      if (e.code === 'F1') {
+    window.addEventListener("keydown", (e) => {
+      if (e.code === "F1") {
         this.toggleDebugCamera();
       }
     });
@@ -57,17 +59,25 @@ export class Game {
 
   private setupCameras(): void {
     // Game camera - fixed, looking down the track
-    this.gameCamera = new FreeCamera('gameCamera', new Vector3(0, 5, -5), this.scene);
+    this.gameCamera = new FreeCamera(
+      "gameCamera",
+      new Vector3(0, 10, -20),
+      this.scene
+    );
     this.gameCamera.setTarget(new Vector3(0, 0, 50));
 
     // Debug camera - free movement for exploring
-    this.debugCamera = new FreeCamera('debugCamera', new Vector3(0, 10, -20), this.scene);
+    this.debugCamera = new FreeCamera(
+      "debugCamera",
+      new Vector3(0, 10, -20),
+      this.scene
+    );
     this.debugCamera.setTarget(new Vector3(0, 0, 0));
     this.debugCamera.speed = 2;
-    this.debugCamera.keysUp = [87];    // W
-    this.debugCamera.keysDown = [83];   // S
-    this.debugCamera.keysLeft = [65];   // A
-    this.debugCamera.keysRight = [68];  // D
+    this.debugCamera.keysUp = [87]; // W
+    this.debugCamera.keysDown = [83]; // S
+    this.debugCamera.keysLeft = [65]; // A
+    this.debugCamera.keysRight = [68]; // D
 
     // Start with game camera active
     this.scene.activeCamera = this.gameCamera;
@@ -80,17 +90,21 @@ export class Game {
       // Switch to debug camera
       this.scene.activeCamera = this.debugCamera;
       this.debugCamera.attachControl(this.canvas, true);
-      console.log('Debug camera enabled - WASD to move, mouse to look');
+      console.log("Debug camera enabled - WASD to move, mouse to look");
     } else {
       // Switch back to game camera
       this.debugCamera.detachControl();
       this.scene.activeCamera = this.gameCamera;
-      console.log('Game camera enabled');
+      console.log("Game camera enabled");
     }
   }
 
   private setupLighting(): void {
-    const light = new HemisphericLight('light', new Vector3(0, 1, 0), this.scene);
+    const light = new HemisphericLight(
+      "light",
+      new Vector3(0, 1, 0),
+      this.scene
+    );
     light.intensity = 1;
   }
 
