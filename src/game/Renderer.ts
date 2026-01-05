@@ -8,6 +8,7 @@ import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { Scene } from "@babylonjs/core/scene";
 import roadTextureUrl from "../assets/road.jpg";
+import { Landscape } from "./Landscape";
 import { Player } from "./Player";
 import { Track } from "./Track";
 
@@ -18,6 +19,7 @@ export class Renderer {
   private stripMaterials: StandardMaterial[] = [];
   private curbMaterials: StandardMaterial[] = [];
   private playerMesh: Mesh;
+  private landscape: Landscape;
 
   private readonly visibleStrips = 100; // Number of strips to render ahead (halved since strips are longer)
   private readonly stripDepth = 48; // Depth of each strip in world units (doubled)
@@ -31,6 +33,7 @@ export class Renderer {
   constructor(private scene: Scene, private track: Track) {
     this.createStripMeshPool();
     this.playerMesh = this.createPlayerMesh();
+    this.landscape = new Landscape(this.scene, this.visibleStrips, this.stripDepth);
   }
 
   private createStripMeshPool(): void {
@@ -288,6 +291,21 @@ export class Renderer {
         stretchFactor
       );
 
+      // Update landscape strips
+      this.landscape.updateStrip(
+        i,
+        stripIndex,
+        strip,
+        baseX,
+        stripY,
+        relativeZ,
+        tiltAngle,
+        shearAmount,
+        stretchFactor,
+        this.roadEdge,
+        this.curbWidth
+      );
+
       // Accumulate for next strip
       cumulativeElevation += elevationChange;
       // Offset must account for current shear's effect on edge position
@@ -316,5 +334,6 @@ export class Renderer {
     this.stripMaterials.forEach((mat) => mat.dispose());
     this.curbMaterials.forEach((mat) => mat.dispose());
     this.playerMesh.dispose();
+    this.landscape.dispose();
   }
 }

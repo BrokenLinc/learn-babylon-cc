@@ -12,7 +12,7 @@ export class Player {
   private readonly acceleration = 200; // Base acceleration rate
   private readonly deceleration = 100; // Natural deceleration (drag)
   private readonly braking = 200; // Braking deceleration
-  private readonly baseSteerSpeed = 1; // Base lateral movement speed
+  private readonly baseSteerSpeed = 2; // Base lateral movement speed
   private readonly roadEdge = 0.83; // xOffset beyond this is off-road
   private readonly curveForce = 0.002; // How strongly curves affect lateral position
 

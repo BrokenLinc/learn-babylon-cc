@@ -1,8 +1,14 @@
+export interface LandscapeSubsection {
+  elevationOffset: number;  // Relative to track elevation (for future rolling hills)
+}
+
 export interface TrackStrip {
   index: number;
   curve: number;      // Horizontal curve: -1 (left) to 1 (right), 0 = straight
   hill: number;       // Vertical curve (future): -1 (down) to 1 (up), 0 = flat
   width: number;      // Road width at this strip
+  leftLandscape: LandscapeSubsection[];   // 5 elements, index 0 = closest to road
+  rightLandscape: LandscapeSubsection[];  // 5 elements, index 0 = closest to road
 }
 
 export class Track {
@@ -31,6 +37,8 @@ export class Track {
         curve: curve,   // Horizontal curve
         hill: hill,     // Elevation change rate
         width: 30,      // Road width in game units
+        leftLandscape: Array(5).fill(null).map(() => ({ elevationOffset: 0 })),
+        rightLandscape: Array(5).fill(null).map(() => ({ elevationOffset: 0 })),
       });
     }
   }
