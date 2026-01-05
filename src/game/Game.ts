@@ -61,10 +61,10 @@ export class Game {
     // Game camera - fixed, looking down the track
     this.gameCamera = new FreeCamera(
       "gameCamera",
-      new Vector3(0, 10, -20),
+      new Vector3(0, 100, -300),
       this.scene
     );
-    this.gameCamera.setTarget(new Vector3(0, 0, 50));
+    this.gameCamera.setTarget(new Vector3(0, -50, 50));
 
     // Debug camera - free movement for exploring
     this.debugCamera = new FreeCamera(

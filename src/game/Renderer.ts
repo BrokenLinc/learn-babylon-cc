@@ -22,6 +22,7 @@ export class Renderer {
   private landscape: Landscape;
 
   private readonly visibleStrips = 100; // Number of strips to render ahead (halved since strips are longer)
+  private readonly backwardStrips = 3; // Number of strips to render behind player
   private readonly stripDepth = 48; // Depth of each strip in world units (doubled)
   private readonly curbWidth = 1; // Width of curb strips
   private readonly roadEdge = 0.83; // Must match Player.ts roadEdge
@@ -33,7 +34,12 @@ export class Renderer {
   constructor(private scene: Scene, private track: Track) {
     this.createStripMeshPool();
     this.playerMesh = this.createPlayerMesh();
-    this.landscape = new Landscape(this.scene, this.visibleStrips, this.stripDepth);
+    this.landscape = new Landscape(
+      this.scene,
+      this.visibleStrips,
+      this.stripDepth,
+      this.backwardStrips
+    );
   }
 
   private createStripMeshPool(): void {
@@ -68,8 +74,9 @@ export class Renderer {
 
     this.curbMaterials = [curbMat2, curbMat2];
 
-    // Create mesh pools
-    for (let i = 0; i < this.visibleStrips; i++) {
+    // Create mesh pools (forward + backward strips)
+    const totalStrips = this.visibleStrips + this.backwardStrips;
+    for (let i = 0; i < totalStrips; i++) {
       // Main road strip
       const strip = MeshBuilder.CreateGround(
         `strip_${i}`,
@@ -103,7 +110,7 @@ export class Renderer {
     // Motorbike-shaped bounding box: thin and tall
     const player = MeshBuilder.CreateBox(
       "player",
-      { width: 0.8, height: 1.8, depth: 2.5 },
+      { width: 3, height: 7, depth: 0.1 },
       this.scene
     );
     const mat = new StandardMaterial("playerMat", this.scene);
@@ -209,6 +216,171 @@ export class Renderer {
       // Player's local Z = (positionInStrip - 0.5) * depth
       cumulativeCurveOffset =
         -cumulativeShear * (positionInStrip - 0.5) * this.stripDepth;
+    }
+
+    // Pre-calculate backward strip curve and elevation data
+    // We need to reverse the accumulation formulas to find values at earlier positions
+    const backwardCurveData: { offset: number; shear: number }[] = [];
+    const backwardElevationData: number[] = [];
+
+    // Start from the beginning of the current strip (positionInStrip = 0)
+    // At that point, cumulativeShear and cumulativeCurveOffset would both be 0
+    let backShear = 0;
+    let backOffset = 0;
+    let backElevation = cumulativeElevation; // Elevation at start of current strip
+
+    for (let i = 0; i < this.backwardStrips; i++) {
+      const behindStripIndex = playerStripIndex - i - 1;
+
+      // Handle track start boundary - can't render strips that don't exist
+      if (behindStripIndex < 0) {
+        backwardCurveData.push({ offset: NaN, shear: NaN });
+        backwardElevationData.push(NaN);
+        continue;
+      }
+
+      const behindStrip = this.track.getStrip(behindStripIndex);
+      if (!behindStrip) {
+        backwardCurveData.push({ offset: NaN, shear: NaN });
+        backwardElevationData.push(NaN);
+        continue;
+      }
+
+      // Get the per-strip shear for this behind strip
+      const behindCurveChange = behindStrip.curve * curveScale;
+      const behindPerStripShear = behindCurveChange / this.stripDepth;
+
+      // Reverse the accumulation formulas:
+      // Forward: shear[n+1] = shear[n] + perStripShear[n]
+      // Reverse: shear[n-1] = shear[n] - perStripShear[n-1]
+      backShear -= behindPerStripShear;
+
+      // Forward: offset[n+1] = offset[n] + shear[n] * depth + perStripShear[n] * depth / 2
+      // Reverse: offset[n-1] = offset[n] - shear[n-1] * depth - perStripShear[n-1] * depth / 2
+      backOffset -=
+        backShear * this.stripDepth +
+        (behindPerStripShear * this.stripDepth) / 2;
+
+      // Reverse elevation: subtract the behind strip's elevation contribution
+      backElevation -= behindStrip.hill * elevationScale;
+
+      backwardCurveData.push({ offset: backOffset, shear: backShear });
+      backwardElevationData.push(backElevation);
+    }
+
+    // Render backward strips (behind player)
+    for (let i = 0; i < this.backwardStrips; i++) {
+      const behindStripIndex = playerStripIndex - i - 1;
+      const meshPoolIndex = this.visibleStrips + i;
+
+      // Skip if at track start or invalid data
+      if (
+        behindStripIndex < 0 ||
+        isNaN(backwardCurveData[i]?.offset) ||
+        isNaN(backwardElevationData[i])
+      ) {
+        // Hide these meshes
+        this.stripMeshes[meshPoolIndex].setEnabled(false);
+        this.leftCurbMeshes[meshPoolIndex].setEnabled(false);
+        this.rightCurbMeshes[meshPoolIndex].setEnabled(false);
+        this.landscape.hideStrip(meshPoolIndex);
+        continue;
+      }
+
+      const strip = this.track.getStrip(behindStripIndex);
+      if (!strip) continue;
+
+      const mesh = this.stripMeshes[meshPoolIndex];
+      const leftCurb = this.leftCurbMeshes[meshPoolIndex];
+      const rightCurb = this.rightCurbMeshes[meshPoolIndex];
+
+      // Enable meshes
+      mesh.setEnabled(true);
+      leftCurb.setEnabled(true);
+      rightCurb.setEnabled(true);
+      this.landscape.showStrip(meshPoolIndex);
+
+      // Use pre-calculated curve data
+      const curveX = backwardCurveData[i].offset;
+      const shearAmount = backwardCurveData[i].shear;
+      const stripElevation = backwardElevationData[i];
+
+      // Calculate Z position (negative, behind player)
+      // Strip i=0 is immediately behind player, its far edge should be at positionInStrip
+      const relativeZ = -(i + 1 - positionInStrip + 0.5) * this.stripDepth;
+
+      // Elevation change for this strip
+      const elevationChange = strip.hill * elevationScale;
+
+      // Tilt and stretch (same as forward)
+      const tiltAngle = Math.atan2(elevationChange, this.stripDepth);
+      const stretchFactor =
+        Math.sqrt(
+          this.stripDepth * this.stripDepth + elevationChange * elevationChange
+        ) / this.stripDepth;
+
+      // X position
+      const baseX = -player.xOffset * strip.width * 0.5 + curveX;
+
+      // Y position with pivot compensation
+      const pivotCompensation =
+        Math.sin(tiltAngle) * stretchFactor * (this.stripDepth / 2);
+      const stripY = stripElevation - playerElevation + pivotCompensation;
+
+      // Width scale
+      const scaleX = strip.width / 50;
+
+      // Apply transforms
+      this.applyShearTransform(
+        mesh,
+        new Vector3(baseX, stripY, relativeZ),
+        tiltAngle,
+        shearAmount,
+        scaleX,
+        stretchFactor
+      );
+
+      // Position curbs at road edges
+      const curbOffset =
+        this.roadEdge * strip.width * 0.5 + this.curbWidth * 0.5;
+
+      this.applyShearTransform(
+        leftCurb,
+        new Vector3(baseX - curbOffset, stripY - 0.01, relativeZ),
+        tiltAngle,
+        shearAmount,
+        1,
+        stretchFactor
+      );
+
+      this.applyShearTransform(
+        rightCurb,
+        new Vector3(baseX + curbOffset, stripY - 0.01, relativeZ),
+        tiltAngle,
+        shearAmount,
+        1,
+        stretchFactor
+      );
+
+      // Update landscape
+      this.landscape.updateStrip(
+        meshPoolIndex,
+        behindStripIndex,
+        strip,
+        baseX,
+        stripY,
+        relativeZ,
+        tiltAngle,
+        shearAmount,
+        stretchFactor,
+        this.roadEdge,
+        this.curbWidth
+      );
+
+      // Update materials based on strip index for alternating colors
+      mesh.material = this.stripMaterials[behindStripIndex % 2];
+      leftCurb.material = this.curbMaterials[behindStripIndex % 2];
+      rightCurb.material = this.curbMaterials[behindStripIndex % 2];
     }
 
     for (let i = 0; i < this.visibleStrips; i++) {

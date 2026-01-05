@@ -26,7 +26,8 @@ export class Landscape {
   constructor(
     private scene: Scene,
     private visibleStrips: number,
-    private stripDepth: number
+    private stripDepth: number,
+    private backwardStrips: number = 0
   ) {
     this.subsectionCenters = this.calculateSubsectionCenters();
     this.createMaterials();
@@ -56,7 +57,8 @@ export class Landscape {
   }
 
   private createMeshPool(): void {
-    for (let i = 0; i < this.visibleStrips; i++) {
+    const totalStrips = this.visibleStrips + this.backwardStrips;
+    for (let i = 0; i < totalStrips; i++) {
       const leftRow: Mesh[] = [];
       const rightRow: Mesh[] = [];
 
@@ -185,6 +187,20 @@ export class Landscape {
         stretchFactor
       );
       rightMesh.material = this.materials[stripIndex % 2];
+    }
+  }
+
+  public hideStrip(meshIndex: number): void {
+    for (let j = 0; j < this.subsectionCount; j++) {
+      this.leftMeshes[meshIndex][j].setEnabled(false);
+      this.rightMeshes[meshIndex][j].setEnabled(false);
+    }
+  }
+
+  public showStrip(meshIndex: number): void {
+    for (let j = 0; j < this.subsectionCount; j++) {
+      this.leftMeshes[meshIndex][j].setEnabled(true);
+      this.rightMeshes[meshIndex][j].setEnabled(true);
     }
   }
 
