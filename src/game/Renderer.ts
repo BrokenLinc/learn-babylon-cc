@@ -306,8 +306,7 @@ export class Renderer {
       const stripElevation = backwardElevationData[i];
 
       // Calculate Z position (negative, behind player)
-      // Strip i=0 is immediately behind player, its far edge should be at positionInStrip
-      const relativeZ = -(i + 1 - positionInStrip + 0.5) * this.stripDepth;
+      const relativeZ = -(i + positionInStrip + 1) * this.stripDepth;
 
       // Elevation change for this strip
       const elevationChange = strip.hill * elevationScale;
@@ -496,7 +495,7 @@ export class Renderer {
     // Player mesh stays at fixed screen position (centered)
     this.playerMesh.position.x = 0;
     this.playerMesh.position.y = 0.5;
-    this.playerMesh.position.z = 2;
+    this.playerMesh.position.z = -this.stripDepth / 2;
   }
 
   public dispose(): void {
