@@ -181,7 +181,7 @@ export class Renderer {
     const playerStripIndex = player.currentStripIndex;
     const positionInStrip = player.positionInStrip;
     const elevationScale = 4;
-    const curveScale = 0.5;
+    const curveScale = 1;
 
     // Calculate player's current elevation by accumulating hill values
     let playerElevation = 0;
@@ -223,10 +223,10 @@ export class Renderer {
     const backwardCurveData: { offset: number; shear: number }[] = [];
     const backwardElevationData: number[] = [];
 
-    // Start from the beginning of the current strip (positionInStrip = 0)
-    // At that point, cumulativeShear and cumulativeCurveOffset would both be 0
-    let backShear = 0;
-    let backOffset = 0;
+    // Start from the current strip's curve state in the player coordinate system
+    // This ensures the first backward strip connects to the current strip's back edge
+    let backShear = cumulativeShear;
+    let backOffset = cumulativeCurveOffset;
     let backElevation = cumulativeElevation; // Elevation at start of current strip
 
     for (let i = 0; i < this.backwardStrips; i++) {
