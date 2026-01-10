@@ -6,6 +6,7 @@ export class Player {
   public distance: number = 0; // Distance traveled down the track
   public velocity: number = 0; // Current speed (units per second)
   public xOffset: number = 0; // Lateral position (-1 to 1, where ~0.5 is road edge)
+  private steerVelocity: number = 0; // Current steering momentum (-1 to 1)
 
   private readonly maxSpeed = 500; // Maximum velocity on road (increased for acceleration curve)
   private readonly offRoadMaxSpeed = 250; // Maximum velocity off-road (half)
@@ -13,6 +14,9 @@ export class Player {
   private readonly deceleration = 100; // Natural deceleration (drag)
   private readonly braking = 200; // Braking deceleration
   private readonly baseSteerSpeed = 2; // Base lateral movement speed
+  private readonly steerAcceleration = 8; // How fast steering builds up
+  private readonly steerDeceleration = 6; // How fast steering returns to neutral
+  private readonly maxSteerVelocity = 1; // Maximum steering rate
   private readonly roadEdge = 0.83; // xOffset beyond this is off-road
   private readonly curveForce = 0.002; // How strongly curves affect lateral position
 
@@ -65,13 +69,28 @@ export class Player {
     const speedRatio = this.velocity / this.maxSpeed;
     const steerSpeed = this.baseSteerSpeed * speedRatio;
 
-    // Handle steering
-    if (input.steerLeft) {
-      this.xOffset -= steerSpeed * deltaTime;
+    // Handle steering with momentum (ease in/out)
+    const targetSteer = (input.steerRight ? 1 : 0) - (input.steerLeft ? 1 : 0);
+
+    if (targetSteer !== 0) {
+      // Accelerate toward target direction
+      this.steerVelocity += targetSteer * this.steerAcceleration * deltaTime;
+      this.steerVelocity = Math.max(
+        -this.maxSteerVelocity,
+        Math.min(this.maxSteerVelocity, this.steerVelocity)
+      );
+    } else {
+      // Decelerate toward zero when no input
+      if (Math.abs(this.steerVelocity) < this.steerDeceleration * deltaTime) {
+        this.steerVelocity = 0;
+      } else {
+        this.steerVelocity -=
+          Math.sign(this.steerVelocity) * this.steerDeceleration * deltaTime;
+      }
     }
-    if (input.steerRight) {
-      this.xOffset += steerSpeed * deltaTime;
-    }
+
+    // Apply steering velocity to position
+    this.xOffset += this.steerVelocity * steerSpeed * deltaTime;
 
     // Apply curve force - track curvature pushes player laterally
     const currentStrip = this.track.getStrip(this.currentStripIndex);
