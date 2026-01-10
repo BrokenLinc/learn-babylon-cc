@@ -27,8 +27,9 @@ export class Game {
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
 
-    // Initialize BabylonJS engine
-    this.engine = new Engine(canvas, true);
+    // Initialize BabylonJS engine (no antialiasing for retro look)
+    this.engine = new Engine(canvas);
+    // this.engine.setHardwareScalingLevel(4);
     this.scene = new Scene(this.engine);
     this.scene.clearColor = new Color4(0.4, 0.6, 0.9, 1); // Sky blue
 
@@ -61,10 +62,10 @@ export class Game {
     // Game camera - fixed, looking down the track
     this.gameCamera = new FreeCamera(
       "gameCamera",
-      new Vector3(0, 100, -300),
+      new Vector3(0, 10, -50),
       this.scene
     );
-    this.gameCamera.setTarget(new Vector3(0, -50, 50));
+    this.gameCamera.setTarget(new Vector3(0, 0, 50));
 
     // Debug camera - free movement for exploring
     this.debugCamera = new FreeCamera(
