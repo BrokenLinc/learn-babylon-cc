@@ -8,22 +8,28 @@ import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { Scene } from "@babylonjs/core/scene";
 import roadTextureUrl from "../assets/road.jpg";
-import { Landscape } from "./Landscape";
 import { Player } from "./Player";
 import { Track } from "./Track";
 
+interface StripGroup {
+  root: Mesh; // Invisible parent with shear transform
+  road: Mesh; // Child at local (0, 0, 0)
+  leftCurb: Mesh; // Child with X offset
+  rightCurb: Mesh; // Child with X offset
+  leftLandscape: Mesh[]; // 5 subsection children
+  rightLandscape: Mesh[]; // 5 subsection children
+}
+
 export class Renderer {
-  private stripMeshes: Mesh[] = [];
-  private leftCurbMeshes: Mesh[] = [];
-  private rightCurbMeshes: Mesh[] = [];
+  private stripGroups: StripGroup[] = [];
   private stripMaterials: StandardMaterial[] = [];
   private curbMaterials: StandardMaterial[] = [];
+  private landscapeMaterials: StandardMaterial[] = [];
   private playerMesh: Mesh;
-  private landscape: Landscape;
 
-  private readonly visibleStrips = 100; // Number of strips to render ahead (halved since strips are longer)
+  private readonly visibleStrips = 100; // Number of strips to render ahead
   private readonly backwardStrips = 3; // Number of strips to render behind player
-  private readonly stripDepth = 48; // Depth of each strip in world units (doubled)
+  private readonly stripDepth = 48; // Depth of each strip in world units
   private readonly curbWidth = 1; // Width of curb strips
   private readonly roadEdge = 0.83; // Must match Player.ts roadEdge
 
@@ -31,39 +37,46 @@ export class Renderer {
   private readonly curbColor1 = new Color3(0.9, 0.1, 0.1); // Red
   private readonly curbColor2 = new Color3(0.95, 0.95, 0.95); // White
 
+  // Landscape configuration (merged from Landscape.ts)
+  private readonly landscapeSubsectionCount = 5;
+  private readonly landscapeWidths = [10, 247.5, 247.5, 247.5, 247.5];
+  private readonly landscapeCenters: number[];
+  private readonly landscapeColor1 = new Color3(0.3, 0.5, 0.2);
+  private readonly landscapeColor2 = new Color3(0.4, 0.6, 0.3);
+
   constructor(private scene: Scene, private track: Track) {
-    this.createStripMeshPool();
+    // Compute landscape subsection centers
+    this.landscapeCenters = this.calculateLandscapeCenters();
+    this.createStripGroups();
     this.playerMesh = this.createPlayerMesh();
-    this.landscape = new Landscape(
-      this.scene,
-      this.visibleStrips,
-      this.stripDepth,
-      this.backwardStrips
-    );
   }
 
-  private createStripMeshPool(): void {
+  private calculateLandscapeCenters(): number[] {
+    const centers: number[] = [];
+    let cumulative = 0;
+    for (const width of this.landscapeWidths) {
+      centers.push(cumulative + width / 2);
+      cumulative += width;
+    }
+    return centers;
+  }
+
+  private createStripGroups(): void {
     // Create road material with texture
     const roadMat = new StandardMaterial("roadMat", this.scene);
-    // Create texture without mipmaps for sharp rendering at distance
     const roadTexture = new Texture(
       roadTextureUrl,
       this.scene,
-      false, // noMipmap - disable mipmapping for sharp textures
+      false, // noMipmap
       true // invertY
     );
-    // Use nearest neighbor sampling for pixel-perfect sharpness
-    // roadTexture.updateSamplingMode(Texture.NEAREST_NEAREST);
-    // The texture is oriented up/down, so V scale controls repetition along the strip
     roadTexture.uScale = 1;
     roadTexture.vScale = 1;
     roadMat.diffuseTexture = roadTexture;
     roadMat.specularColor = Color3.Black();
-
-    // Use same material for all strips (texture provides visual variety)
     this.stripMaterials = [roadMat, roadMat];
 
-    // Create curb materials for alternating curbs
+    // Create curb materials
     const curbMat1 = new StandardMaterial("curbMat1", this.scene);
     curbMat1.diffuseColor = this.curbColor1;
     curbMat1.specularColor = Color3.Black();
@@ -71,38 +84,90 @@ export class Renderer {
     const curbMat2 = new StandardMaterial("curbMat2", this.scene);
     curbMat2.diffuseColor = this.curbColor2;
     curbMat2.specularColor = Color3.Black();
-
     this.curbMaterials = [curbMat2, curbMat2];
 
-    // Create mesh pools (forward + backward strips)
+    // Create landscape materials
+    const landscapeMat1 = new StandardMaterial("landscapeMat1", this.scene);
+    landscapeMat1.diffuseColor = this.landscapeColor1;
+    landscapeMat1.specularColor = Color3.Black();
+
+    const landscapeMat2 = new StandardMaterial("landscapeMat2", this.scene);
+    landscapeMat2.diffuseColor = this.landscapeColor2;
+    landscapeMat2.specularColor = Color3.Black();
+    this.landscapeMaterials = [landscapeMat1, landscapeMat2];
+
+    // Create strip groups (forward + backward)
     const totalStrips = this.visibleStrips + this.backwardStrips;
     for (let i = 0; i < totalStrips; i++) {
-      // Main road strip
-      const strip = MeshBuilder.CreateGround(
+      // Create invisible root parent for the group
+      const root = MeshBuilder.CreatePlane(
+        `stripRoot_${i}`,
+        { size: 0.001 },
+        this.scene
+      );
+      root.visibility = 0;
+
+      // Road mesh - child at local origin
+      const road = MeshBuilder.CreateGround(
         `strip_${i}`,
         { width: 50, height: this.stripDepth },
         this.scene
       );
-      strip.material = this.stripMaterials[i % 2];
-      this.stripMeshes.push(strip);
+      road.parent = root;
+      road.position = Vector3.Zero();
+      road.material = this.stripMaterials[i % 2];
 
-      // Left curb
+      // Left curb - child with X offset set per frame
       const leftCurb = MeshBuilder.CreateGround(
         `leftCurb_${i}`,
         { width: this.curbWidth, height: this.stripDepth },
         this.scene
       );
+      leftCurb.parent = root;
       leftCurb.material = this.curbMaterials[i % 2];
-      this.leftCurbMeshes.push(leftCurb);
 
-      // Right curb
+      // Right curb - child with X offset set per frame
       const rightCurb = MeshBuilder.CreateGround(
         `rightCurb_${i}`,
         { width: this.curbWidth, height: this.stripDepth },
         this.scene
       );
+      rightCurb.parent = root;
       rightCurb.material = this.curbMaterials[i % 2];
-      this.rightCurbMeshes.push(rightCurb);
+
+      // Landscape subsections - children with computed X offsets
+      const leftLandscape: Mesh[] = [];
+      const rightLandscape: Mesh[] = [];
+      for (let j = 0; j < this.landscapeSubsectionCount; j++) {
+        const width = this.landscapeWidths[j];
+
+        const leftMesh = MeshBuilder.CreateGround(
+          `leftLandscape_${i}_${j}`,
+          { width, height: this.stripDepth },
+          this.scene
+        );
+        leftMesh.parent = root;
+        leftMesh.material = this.landscapeMaterials[i % 2];
+        leftLandscape.push(leftMesh);
+
+        const rightMesh = MeshBuilder.CreateGround(
+          `rightLandscape_${i}_${j}`,
+          { width, height: this.stripDepth },
+          this.scene
+        );
+        rightMesh.parent = root;
+        rightMesh.material = this.landscapeMaterials[i % 2];
+        rightLandscape.push(rightMesh);
+      }
+
+      this.stripGroups.push({
+        root,
+        road,
+        leftCurb,
+        rightCurb,
+        leftLandscape,
+        rightLandscape,
+      });
     }
   }
 
@@ -121,60 +186,94 @@ export class Renderer {
   }
 
   /**
-   * Apply a transformation matrix with shear to a mesh.
-   * Shear skews the mesh so that X position changes based on Z position.
-   * This creates a true parallelogram shape rather than a rotated rectangle.
+   * Apply transform to a strip group's root mesh.
+   * All children inherit this transform automatically.
    */
-  private applyShearTransform(
-    mesh: Mesh,
+  private applyGroupTransform(
+    group: StripGroup,
     position: Vector3,
     tiltAngle: number,
     shearAmount: number,
-    scaleX: number,
-    scaleZ: number
+    stretchFactor: number
   ): void {
-    // Build transformation matrix with shear
-    // Shear matrix: X += shearAmount * Z
     const shearMatrix = Matrix.FromValues(
       1,
       0,
       0,
-      0, // column 0 (X basis)
+      0,
       0,
       1,
       0,
-      0, // column 1 (Y basis)
+      0,
       shearAmount,
       0,
       1,
-      0, // column 2 (Z basis) - shear adds to X
       0,
       0,
       0,
-      1 // column 3 (W)
+      0,
+      1
     );
-
-    // Scale matrix
-    const scaleMatrix = Matrix.Scaling(scaleX, 1, scaleZ);
-
-    // Rotation matrix (tilt around X axis for elevation)
+    const scaleMatrix = Matrix.Scaling(1, 1, stretchFactor);
     const rotationMatrix = Matrix.RotationX(-tiltAngle);
-
-    // Translation matrix
     const translationMatrix = Matrix.Translation(
       position.x,
       position.y,
       position.z
     );
 
-    // Combine: Scale -> Shear -> Rotate -> Translate
     const worldMatrix = scaleMatrix
       .multiply(shearMatrix)
       .multiply(rotationMatrix)
       .multiply(translationMatrix);
 
-    // Freeze the world matrix to this custom transform
-    mesh.freezeWorldMatrix(worldMatrix);
+    group.root.freezeWorldMatrix(worldMatrix);
+  }
+
+  /**
+   * Update child local positions within a strip group.
+   */
+  private updateGroupChildren(
+    group: StripGroup,
+    strip: { width: number; leftLandscape?: { elevationOffset: number }[]; rightLandscape?: { elevationOffset: number }[] },
+    stripIndex: number
+  ): void {
+    // Road: scale X based on strip width
+    group.road.scaling.x = strip.width / 50;
+
+    // Curbs: position at road edges
+    const halfRoadWidth = this.roadEdge * strip.width * 0.5;
+    const curbOffset = halfRoadWidth + this.curbWidth * 0.5;
+    group.leftCurb.position.set(-curbOffset, -0.01, 0);
+    group.rightCurb.position.set(curbOffset, -0.01, 0);
+
+    // Landscape: position relative to curb edges
+    const leftCurbEdge = -halfRoadWidth - this.curbWidth;
+    const rightCurbEdge = halfRoadWidth + this.curbWidth;
+    for (let j = 0; j < this.landscapeSubsectionCount; j++) {
+      const leftElevationOffset = strip.leftLandscape?.[j]?.elevationOffset ?? 0;
+      const rightElevationOffset = strip.rightLandscape?.[j]?.elevationOffset ?? 0;
+
+      group.leftLandscape[j].position.set(
+        leftCurbEdge - this.landscapeCenters[j],
+        leftElevationOffset - 0.02,
+        0
+      );
+      group.rightLandscape[j].position.set(
+        rightCurbEdge + this.landscapeCenters[j],
+        rightElevationOffset - 0.02,
+        0
+      );
+
+      // Update materials for alternating colors
+      group.leftLandscape[j].material = this.landscapeMaterials[stripIndex % 2];
+      group.rightLandscape[j].material = this.landscapeMaterials[stripIndex % 2];
+    }
+
+    // Update road and curb materials
+    group.road.material = this.stripMaterials[stripIndex % 2];
+    group.leftCurb.material = this.curbMaterials[stripIndex % 2];
+    group.rightCurb.material = this.curbMaterials[stripIndex % 2];
   }
 
   public update(player: Player): void {
@@ -272,6 +371,7 @@ export class Renderer {
     for (let i = 0; i < this.backwardStrips; i++) {
       const behindStripIndex = playerStripIndex - i - 1;
       const meshPoolIndex = this.visibleStrips + i;
+      const group = this.stripGroups[meshPoolIndex];
 
       // Skip if at track start or invalid data
       if (
@@ -279,26 +379,16 @@ export class Renderer {
         isNaN(backwardCurveData[i]?.offset) ||
         isNaN(backwardElevationData[i])
       ) {
-        // Hide these meshes
-        this.stripMeshes[meshPoolIndex].setEnabled(false);
-        this.leftCurbMeshes[meshPoolIndex].setEnabled(false);
-        this.rightCurbMeshes[meshPoolIndex].setEnabled(false);
-        this.landscape.hideStrip(meshPoolIndex);
+        // Hide the group
+        group.root.setEnabled(false);
         continue;
       }
 
       const strip = this.track.getStrip(behindStripIndex);
       if (!strip) continue;
 
-      const mesh = this.stripMeshes[meshPoolIndex];
-      const leftCurb = this.leftCurbMeshes[meshPoolIndex];
-      const rightCurb = this.rightCurbMeshes[meshPoolIndex];
-
-      // Enable meshes
-      mesh.setEnabled(true);
-      leftCurb.setEnabled(true);
-      rightCurb.setEnabled(true);
-      this.landscape.showStrip(meshPoolIndex);
+      // Enable the group
+      group.root.setEnabled(true);
 
       // Use pre-calculated curve data
       const curveX = backwardCurveData[i].offset;
@@ -311,7 +401,7 @@ export class Renderer {
       // Elevation change for this strip
       const elevationChange = strip.hill * elevationScale;
 
-      // Tilt and stretch (same as forward)
+      // Tilt and stretch
       const tiltAngle = Math.atan2(elevationChange, this.stripDepth);
       const stretchFactor =
         Math.sqrt(
@@ -326,68 +416,23 @@ export class Renderer {
         Math.sin(tiltAngle) * stretchFactor * (this.stripDepth / 2);
       const stripY = stripElevation - playerElevation + pivotCompensation;
 
-      // Width scale
-      const scaleX = strip.width / 50;
-
-      // Apply transforms
-      this.applyShearTransform(
-        mesh,
+      // Apply single transform to group root
+      this.applyGroupTransform(
+        group,
         new Vector3(baseX, stripY, relativeZ),
         tiltAngle,
         shearAmount,
-        scaleX,
         stretchFactor
       );
 
-      // Position curbs at road edges
-      const curbOffset =
-        this.roadEdge * strip.width * 0.5 + this.curbWidth * 0.5;
-
-      this.applyShearTransform(
-        leftCurb,
-        new Vector3(baseX - curbOffset, stripY - 0.01, relativeZ),
-        tiltAngle,
-        shearAmount,
-        1,
-        stretchFactor
-      );
-
-      this.applyShearTransform(
-        rightCurb,
-        new Vector3(baseX + curbOffset, stripY - 0.01, relativeZ),
-        tiltAngle,
-        shearAmount,
-        1,
-        stretchFactor
-      );
-
-      // Update landscape
-      this.landscape.updateStrip(
-        meshPoolIndex,
-        behindStripIndex,
-        strip,
-        baseX,
-        stripY,
-        relativeZ,
-        tiltAngle,
-        shearAmount,
-        stretchFactor,
-        this.roadEdge,
-        this.curbWidth
-      );
-
-      // Update materials based on strip index for alternating colors
-      mesh.material = this.stripMaterials[behindStripIndex % 2];
-      leftCurb.material = this.curbMaterials[behindStripIndex % 2];
-      rightCurb.material = this.curbMaterials[behindStripIndex % 2];
+      // Update child positions and materials
+      this.updateGroupChildren(group, strip, behindStripIndex);
     }
 
     for (let i = 0; i < this.visibleStrips; i++) {
       const stripIndex = playerStripIndex + i;
       const strip = this.track.getStrip(stripIndex);
-      const mesh = this.stripMeshes[i];
-      const leftCurb = this.leftCurbMeshes[i];
-      const rightCurb = this.rightCurbMeshes[i];
+      const group = this.stripGroups[i];
 
       if (!strip) continue;
 
@@ -396,9 +441,7 @@ export class Renderer {
 
       // Get curve values for this strip
       const curveChange = strip.curve * curveScale;
-      // Per-strip shear for accumulation
       const perStripShear = curveChange / this.stripDepth;
-      // Use cumulative shear - player position is zero point
       const shearAmount = cumulativeShear;
 
       // Calculate Z position relative to player
@@ -414,82 +457,32 @@ export class Renderer {
         ) / this.stripDepth;
 
       // Calculate X offset: player steering + curve offset
-      // curveX is already relative to player (player's position = 0)
       const curveX = cumulativeCurveOffset;
       const baseX = -player.xOffset * strip.width * 0.5 + curveX;
 
-      // Pivot compensation: strips rotate around center, but we position by near edge
-      // When tilted, the near edge drops down by sin(tilt) * scaledDepth/2
-      // Compensate by shifting the strip up so near edge lands at correct elevation
+      // Pivot compensation
       const pivotCompensation =
         Math.sin(tiltAngle) * stretchFactor * (this.stripDepth / 2);
       const stripY = cumulativeElevation - playerElevation + pivotCompensation;
 
-      // Scale width based on track data
-      const scaleX = strip.width / 50;
-
-      // Apply shear transform to main road strip
-      this.applyShearTransform(
-        mesh,
+      // Apply single transform to group root
+      this.applyGroupTransform(
+        group,
         new Vector3(baseX, stripY, relativeZ),
         tiltAngle,
         shearAmount,
-        scaleX,
         stretchFactor
       );
 
-      // Position curbs at road edges
-      const curbOffset =
-        this.roadEdge * strip.width * 0.5 + this.curbWidth * 0.5;
-
-      // Left curb - apply same shear transform
-      this.applyShearTransform(
-        leftCurb,
-        new Vector3(baseX - curbOffset, stripY - 0.01, relativeZ),
-        tiltAngle,
-        shearAmount,
-        1, // curb width is fixed
-        stretchFactor
-      );
-
-      // Right curb - apply same shear transform
-      this.applyShearTransform(
-        rightCurb,
-        new Vector3(baseX + curbOffset, stripY - 0.01, relativeZ),
-        tiltAngle,
-        shearAmount,
-        1, // curb width is fixed
-        stretchFactor
-      );
-
-      // Update landscape strips
-      this.landscape.updateStrip(
-        i,
-        stripIndex,
-        strip,
-        baseX,
-        stripY,
-        relativeZ,
-        tiltAngle,
-        shearAmount,
-        stretchFactor,
-        this.roadEdge,
-        this.curbWidth
-      );
+      // Update child positions and materials
+      this.updateGroupChildren(group, strip, stripIndex);
 
       // Accumulate for next strip
       cumulativeElevation += elevationChange;
-      // Offset must account for current shear's effect on edge position
-      // Formula: shear_N * depth + perStripShear * depth/2
       cumulativeCurveOffset +=
         cumulativeShear * this.stripDepth +
         (perStripShear * this.stripDepth) / 2;
       cumulativeShear += perStripShear;
-
-      // Update materials based on strip index for alternating colors
-      mesh.material = this.stripMaterials[stripIndex % 2];
-      leftCurb.material = this.curbMaterials[stripIndex % 2];
-      rightCurb.material = this.curbMaterials[stripIndex % 2];
     }
 
     // Player mesh stays at fixed screen position (centered)
@@ -499,12 +492,17 @@ export class Renderer {
   }
 
   public dispose(): void {
-    this.stripMeshes.forEach((mesh) => mesh.dispose());
-    this.leftCurbMeshes.forEach((mesh) => mesh.dispose());
-    this.rightCurbMeshes.forEach((mesh) => mesh.dispose());
+    this.stripGroups.forEach((group) => {
+      group.root.dispose();
+      group.road.dispose();
+      group.leftCurb.dispose();
+      group.rightCurb.dispose();
+      group.leftLandscape.forEach((m) => m.dispose());
+      group.rightLandscape.forEach((m) => m.dispose());
+    });
     this.stripMaterials.forEach((mat) => mat.dispose());
     this.curbMaterials.forEach((mat) => mat.dispose());
+    this.landscapeMaterials.forEach((mat) => mat.dispose());
     this.playerMesh.dispose();
-    this.landscape.dispose();
   }
 }
