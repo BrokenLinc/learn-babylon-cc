@@ -104,10 +104,7 @@ export class Player {
     // Soft clamp lateral position (allow going off-road but not too far)
     this.xOffset = Math.max(-1.5, Math.min(1.5, this.xOffset));
 
-    // Loop track
-    if (this.distance >= this.track.totalDistance) {
-      this.distance -= this.track.totalDistance;
-    }
+    // Infinite track - no looping needed
   }
 
   public get currentStripIndex(): number {
