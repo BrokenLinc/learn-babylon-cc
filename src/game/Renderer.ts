@@ -1,5 +1,6 @@
 /** @format */
 
+import { VertexBuffer } from "@babylonjs/core/Buffers/buffer";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
@@ -16,8 +17,8 @@ interface StripGroup {
   road: Mesh; // Child at local (0, 0, 0)
   leftCurb: Mesh; // Child with X offset
   rightCurb: Mesh; // Child with X offset
-  leftLandscape: Mesh[]; // 5 subsection children
-  rightLandscape: Mesh[]; // 5 subsection children
+  leftLandscape: Mesh; // Single mesh with modifiable vertices
+  rightLandscape: Mesh; // Single mesh with modifiable vertices
 }
 
 export class Renderer {
@@ -37,28 +38,15 @@ export class Renderer {
   private readonly curbColor1 = new Color3(0.9, 0.1, 0.1); // Red
   private readonly curbColor2 = new Color3(0.95, 0.95, 0.95); // White
 
-  // Landscape configuration (merged from Landscape.ts)
-  private readonly landscapeSubsectionCount = 5;
-  private readonly landscapeWidths = [10, 247.5, 247.5, 247.5, 247.5];
-  private readonly landscapeCenters: number[];
+  // Landscape configuration
+  private readonly landscapeWidth = 1000; // Width per side
+  private readonly landscapeSegments = 4; // Creates 5 vertices across
   private readonly landscapeColor1 = new Color3(0.3, 0.5, 0.2);
   private readonly landscapeColor2 = new Color3(0.4, 0.6, 0.3);
 
   constructor(private scene: Scene, private track: Track) {
-    // Compute landscape subsection centers
-    this.landscapeCenters = this.calculateLandscapeCenters();
     this.createStripGroups();
     this.playerMesh = this.createPlayerMesh();
-  }
-
-  private calculateLandscapeCenters(): number[] {
-    const centers: number[] = [];
-    let cumulative = 0;
-    for (const width of this.landscapeWidths) {
-      centers.push(cumulative + width / 2);
-      cumulative += width;
-    }
-    return centers;
   }
 
   private createStripGroups(): void {
@@ -135,30 +123,34 @@ export class Renderer {
       rightCurb.parent = root;
       rightCurb.material = this.curbMaterials[i % 2];
 
-      // Landscape subsections - children with computed X offsets
-      const leftLandscape: Mesh[] = [];
-      const rightLandscape: Mesh[] = [];
-      for (let j = 0; j < this.landscapeSubsectionCount; j++) {
-        const width = this.landscapeWidths[j];
+      // Landscape meshes - single mesh per side with modifiable vertices
+      const leftLandscape = MeshBuilder.CreateGround(
+        `leftLandscape_${i}`,
+        {
+          width: this.landscapeWidth,
+          height: this.stripDepth,
+          subdivisionsX: this.landscapeSegments,
+          subdivisionsY: 1,
+          updatable: true,
+        },
+        this.scene
+      );
+      leftLandscape.parent = root;
+      leftLandscape.material = this.landscapeMaterials[i % 2];
 
-        const leftMesh = MeshBuilder.CreateGround(
-          `leftLandscape_${i}_${j}`,
-          { width, height: this.stripDepth },
-          this.scene
-        );
-        leftMesh.parent = root;
-        leftMesh.material = this.landscapeMaterials[i % 2];
-        leftLandscape.push(leftMesh);
-
-        const rightMesh = MeshBuilder.CreateGround(
-          `rightLandscape_${i}_${j}`,
-          { width, height: this.stripDepth },
-          this.scene
-        );
-        rightMesh.parent = root;
-        rightMesh.material = this.landscapeMaterials[i % 2];
-        rightLandscape.push(rightMesh);
-      }
+      const rightLandscape = MeshBuilder.CreateGround(
+        `rightLandscape_${i}`,
+        {
+          width: this.landscapeWidth,
+          height: this.stripDepth,
+          subdivisionsX: this.landscapeSegments,
+          subdivisionsY: 1,
+          updatable: true,
+        },
+        this.scene
+      );
+      rightLandscape.parent = root;
+      rightLandscape.material = this.landscapeMaterials[i % 2];
 
       this.stripGroups.push({
         root,
@@ -231,11 +223,43 @@ export class Renderer {
   }
 
   /**
+   * Update landscape mesh vertex elevations for seamless terrain.
+   * Front row uses current strip's elevations, rear row uses next strip's
+   * to ensure adjacent strips connect seamlessly.
+   */
+  private updateLandscapeElevations(
+    mesh: Mesh,
+    stripIndex: number,
+    nextStripIndex: number
+  ): void {
+    const positions = mesh.getVerticesData(VertexBuffer.PositionKind);
+    if (!positions) return;
+
+    const verticesPerRow = this.landscapeSegments + 1; // 5 vertices
+
+    for (let i = 0; i < verticesPerRow; i++) {
+      // Calculate lateral offset from road edge (0 = near road, landscapeWidth = far)
+      const t = i / this.landscapeSegments;
+      const lateralOffset = t * this.landscapeWidth;
+
+      // Front row elevation (current strip)
+      const frontY = this.track.getLandscapeElevation(stripIndex, lateralOffset);
+      positions[i * 3 + 1] = frontY;
+
+      // Rear row elevation (next strip's front = seamless connection)
+      const rearY = this.track.getLandscapeElevation(nextStripIndex, lateralOffset);
+      positions[(i + verticesPerRow) * 3 + 1] = rearY;
+    }
+
+    mesh.updateVerticesData(VertexBuffer.PositionKind, positions);
+  }
+
+  /**
    * Update child local positions within a strip group.
    */
   private updateGroupChildren(
     group: StripGroup,
-    strip: { width: number; leftLandscape?: { elevationOffset: number }[]; rightLandscape?: { elevationOffset: number }[] },
+    strip: { width: number },
     stripIndex: number
   ): void {
     // Road: scale X based on strip width
@@ -247,33 +271,24 @@ export class Renderer {
     group.leftCurb.position.set(-curbOffset, -0.01, 0);
     group.rightCurb.position.set(curbOffset, -0.01, 0);
 
-    // Landscape: position relative to curb edges
+    // Landscape: position single meshes at curb edges
     const leftCurbEdge = -halfRoadWidth - this.curbWidth;
     const rightCurbEdge = halfRoadWidth + this.curbWidth;
-    for (let j = 0; j < this.landscapeSubsectionCount; j++) {
-      const leftElevationOffset = strip.leftLandscape?.[j]?.elevationOffset ?? 0;
-      const rightElevationOffset = strip.rightLandscape?.[j]?.elevationOffset ?? 0;
+    const landscapeXOffset = this.landscapeWidth / 2;
+    group.leftLandscape.position.set(leftCurbEdge - landscapeXOffset, -0.02, 0);
+    group.rightLandscape.position.set(rightCurbEdge + landscapeXOffset, -0.02, 0);
 
-      group.leftLandscape[j].position.set(
-        leftCurbEdge - this.landscapeCenters[j],
-        leftElevationOffset - 0.02,
-        0
-      );
-      group.rightLandscape[j].position.set(
-        rightCurbEdge + this.landscapeCenters[j],
-        rightElevationOffset - 0.02,
-        0
-      );
+    // Update vertex elevations for seamless terrain
+    const nextStripIndex = stripIndex + 1;
+    this.updateLandscapeElevations(group.leftLandscape, stripIndex, nextStripIndex);
+    this.updateLandscapeElevations(group.rightLandscape, stripIndex, nextStripIndex);
 
-      // Update materials for alternating colors
-      group.leftLandscape[j].material = this.landscapeMaterials[stripIndex % 2];
-      group.rightLandscape[j].material = this.landscapeMaterials[stripIndex % 2];
-    }
-
-    // Update road and curb materials
+    // Update materials
     group.road.material = this.stripMaterials[stripIndex % 2];
     group.leftCurb.material = this.curbMaterials[stripIndex % 2];
     group.rightCurb.material = this.curbMaterials[stripIndex % 2];
+    group.leftLandscape.material = this.landscapeMaterials[stripIndex % 2];
+    group.rightLandscape.material = this.landscapeMaterials[stripIndex % 2];
   }
 
   public update(player: Player): void {
@@ -497,8 +512,8 @@ export class Renderer {
       group.road.dispose();
       group.leftCurb.dispose();
       group.rightCurb.dispose();
-      group.leftLandscape.forEach((m) => m.dispose());
-      group.rightLandscape.forEach((m) => m.dispose());
+      group.leftLandscape.dispose();
+      group.rightLandscape.dispose();
     });
     this.stripMaterials.forEach((mat) => mat.dispose());
     this.curbMaterials.forEach((mat) => mat.dispose());

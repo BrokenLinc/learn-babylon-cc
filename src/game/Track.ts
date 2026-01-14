@@ -1,14 +1,8 @@
-export interface LandscapeSubsection {
-  elevationOffset: number; // Relative to track elevation (for future rolling hills)
-}
-
 export interface TrackStrip {
   index: number;
   curve: number; // Horizontal curve: -1 (left) to 1 (right), 0 = straight
   hill: number; // Vertical curve: -1 (down) to 1 (up), 0 = flat
   width: number; // Road width at this strip
-  leftLandscape: LandscapeSubsection[]; // 5 elements, index 0 = closest to road
-  rightLandscape: LandscapeSubsection[]; // 5 elements, index 0 = closest to road
 }
 
 export class Track {
@@ -40,12 +34,6 @@ export class Track {
       curve,
       hill,
       width: 30,
-      leftLandscape: Array(5)
-        .fill(null)
-        .map(() => ({ elevationOffset: 0 })),
-      rightLandscape: Array(5)
-        .fill(null)
-        .map(() => ({ elevationOffset: 0 })),
     };
   }
 
@@ -73,5 +61,22 @@ export class Track {
 
   public get totalDistance(): number {
     return this.trackLength * this.stripLength;
+  }
+
+  /**
+   * Generate landscape elevation at a specific strip index and lateral position.
+   * Uses deterministic sine waves for natural-looking undulating hills.
+   * @param stripIndex - The track strip index
+   * @param lateralOffset - Distance from road edge (0 = near road, larger = farther)
+   * @returns Y elevation offset for the terrain
+   */
+  public getLandscapeElevation(stripIndex: number, lateralOffset: number): number {
+    // Combine sine waves for natural-looking hills
+    // Different frequencies create varied terrain
+    return (
+      Math.sin(stripIndex * 0.03 + lateralOffset * 0.01) * 5 + // Large rolling hills
+      Math.sin(stripIndex * 0.07 - lateralOffset * 0.02) * 2.5 + // Medium undulation
+      Math.sin(lateralOffset * 0.005) * 3 // Hills that vary with distance from road
+    );
   }
 }
