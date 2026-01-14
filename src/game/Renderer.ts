@@ -276,18 +276,11 @@ export class Renderer {
         elevationScale *
         blendFactor;
 
-      // FRONT ROW (localZ = -halfDepth):
-      // We want the vertex to appear at frontLandscapeElev above the road surface.
-      // After rotation: worldY = localY * cos(tilt) + (-halfDepth * stretch) * sin(tilt)
-      // The road surface at front edge is at: 0 * cos(tilt) + (-halfDepth * stretch) * sin(tilt) = -halfDepth * stretch * sin(tilt)
-      // For landscape to be frontLandscapeElev above road:
-      //   localY * cos(tilt) - halfDepth * stretch * sin(tilt) = -halfDepth * stretch * sin(tilt) + frontLandscapeElev
-      //   localY * cos(tilt) = frontLandscapeElev
-      //   localY = frontLandscapeElev / cos(tilt)
-      const localY_front = frontLandscapeElev / cosTilt;
-      positions[i * 3 + 1] = localY_front;
+      // Babylon.js CreateGround vertex order is BACK-TO-FRONT:
+      // - Row 0 (indices 0-4): Z = +halfDepth → REAR (further from player)
+      // - Row 1 (indices 5-9): Z = -halfDepth → FRONT (closer to player)
 
-      // REAR ROW (localZ = +halfDepth):
+      // REAR ROW (localZ = +halfDepth) - indices 0-4:
       // Must match the world position of the NEXT strip's front row.
       // Next strip front row (at localZ = -halfDepth) with landscape elevation rearLandscapeElev:
       //   localY_nextFront = rearLandscapeElev / cos(nextTilt)
@@ -304,7 +297,18 @@ export class Renderer {
       const localY_rear =
         (worldY_nextFront - stripY - halfDepth * stretchFactor * sinTilt) /
         cosTilt;
-      positions[(i + verticesPerRow) * 3 + 1] = localY_rear;
+      positions[i * 3 + 1] = localY_rear;
+
+      // FRONT ROW (localZ = -halfDepth) - indices 5-9:
+      // We want the vertex to appear at frontLandscapeElev above the road surface.
+      // After rotation: worldY = localY * cos(tilt) + (-halfDepth * stretch) * sin(tilt)
+      // The road surface at front edge is at: 0 * cos(tilt) + (-halfDepth * stretch) * sin(tilt) = -halfDepth * stretch * sin(tilt)
+      // For landscape to be frontLandscapeElev above road:
+      //   localY * cos(tilt) - halfDepth * stretch * sin(tilt) = -halfDepth * stretch * sin(tilt) + frontLandscapeElev
+      //   localY * cos(tilt) = frontLandscapeElev
+      //   localY = frontLandscapeElev / cos(tilt)
+      const localY_front = frontLandscapeElev / cosTilt;
+      positions[(i + verticesPerRow) * 3 + 1] = localY_front;
     }
 
     mesh.updateVerticesData(VertexBuffer.PositionKind, positions);

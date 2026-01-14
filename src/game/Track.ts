@@ -33,8 +33,8 @@ export class Track {
 
     return {
       index,
-      curve: 0,
-      hill: 0,
+      curve,
+      hill,
       width: 30,
     };
   }
