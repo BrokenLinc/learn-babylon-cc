@@ -230,24 +230,35 @@ export class Renderer {
   private updateLandscapeElevations(
     mesh: Mesh,
     stripIndex: number,
-    nextStripIndex: number
+    nextStripIndex: number,
+    isLeftSide: boolean
   ): void {
     const positions = mesh.getVerticesData(VertexBuffer.PositionKind);
     if (!positions) return;
 
     const verticesPerRow = this.landscapeSegments + 1; // 5 vertices
+    const elevationScale = 5; // 5x intensity for visible hills
 
     for (let i = 0; i < verticesPerRow; i++) {
-      // Calculate lateral offset from road edge (0 = near road, landscapeWidth = far)
       const t = i / this.landscapeSegments;
-      const lateralOffset = t * this.landscapeWidth;
+
+      // For left side: vertex 0 is far from road, vertex 4 is near road (invert blend)
+      // For right side: vertex 0 is near road, vertex 4 is far from road
+      const blendFactor = isLeftSide ? 1 - t : t;
+      const lateralOffset = blendFactor * this.landscapeWidth;
 
       // Front row elevation (current strip)
-      const frontY = this.track.getLandscapeElevation(stripIndex, lateralOffset);
+      const frontY =
+        this.track.getLandscapeElevation(stripIndex, lateralOffset) *
+        elevationScale *
+        blendFactor;
       positions[i * 3 + 1] = frontY;
 
       // Rear row elevation (next strip's front = seamless connection)
-      const rearY = this.track.getLandscapeElevation(nextStripIndex, lateralOffset);
+      const rearY =
+        this.track.getLandscapeElevation(nextStripIndex, lateralOffset) *
+        elevationScale *
+        blendFactor;
       positions[(i + verticesPerRow) * 3 + 1] = rearY;
     }
 
@@ -280,8 +291,8 @@ export class Renderer {
 
     // Update vertex elevations for seamless terrain
     const nextStripIndex = stripIndex + 1;
-    this.updateLandscapeElevations(group.leftLandscape, stripIndex, nextStripIndex);
-    this.updateLandscapeElevations(group.rightLandscape, stripIndex, nextStripIndex);
+    this.updateLandscapeElevations(group.leftLandscape, stripIndex, nextStripIndex, true);
+    this.updateLandscapeElevations(group.rightLandscape, stripIndex, nextStripIndex, false);
 
     // Update materials
     group.road.material = this.stripMaterials[stripIndex % 2];
