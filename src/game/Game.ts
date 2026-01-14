@@ -3,7 +3,7 @@
 import { FreeCamera } from "@babylonjs/core/Cameras/freeCamera";
 import { Engine } from "@babylonjs/core/Engines/engine";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
-import { Color4 } from "@babylonjs/core/Maths/math.color";
+import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Scene } from "@babylonjs/core/scene";
 import { Input } from "./Input";
@@ -32,6 +32,12 @@ export class Game {
     // this.engine.setHardwareScalingLevel(4);
     this.scene = new Scene(this.engine);
     this.scene.clearColor = new Color4(0.4, 0.6, 0.9, 1); // Sky blue
+
+    // Configure distance fog to fade distant strips into the background
+    this.scene.fogMode = Scene.FOGMODE_LINEAR;
+    this.scene.fogColor = new Color3(0.4, 0.6, 0.9); // Match clearColor
+    this.scene.fogStart = 1900; // Start fading ~40 strips ahead
+    this.scene.fogEnd = 3800; // Fully fogged at ~80 strips
 
     // Create cameras
     this.setupCameras();

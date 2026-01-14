@@ -28,7 +28,7 @@ export class Renderer {
   private landscapeMaterials: StandardMaterial[] = [];
   private playerMesh: Mesh;
 
-  private readonly visibleStrips = 100; // Number of strips to render ahead
+  private readonly visibleStrips = 80; // Number of strips to render ahead
   private readonly backwardStrips = 3; // Number of strips to render behind player
   private readonly stripDepth = 48; // Depth of each strip in world units
   private readonly curbWidth = 1; // Width of curb strips
@@ -39,8 +39,8 @@ export class Renderer {
   private readonly curbColor2 = new Color3(0.95, 0.95, 0.95); // White
 
   // Landscape configuration
-  private readonly landscapeWidth = 1000; // Width per side
-  private readonly landscapeSegments = 4; // Creates 5 vertices across
+  private readonly landscapeWidth = 1200; // Width per side
+  private readonly landscapeSegments = 34; // Creates 5 vertices across
   private readonly landscapeColor1 = new Color3(0.3, 0.5, 0.2);
   private readonly landscapeColor2 = new Color3(0.4, 0.6, 0.3);
 
@@ -344,7 +344,11 @@ export class Renderer {
     const rightCurbEdge = halfRoadWidth + this.curbWidth;
     const landscapeXOffset = this.landscapeWidth / 2;
     group.leftLandscape.position.set(leftCurbEdge - landscapeXOffset, -0.02, 0);
-    group.rightLandscape.position.set(rightCurbEdge + landscapeXOffset, -0.02, 0);
+    group.rightLandscape.position.set(
+      rightCurbEdge + landscapeXOffset,
+      -0.02,
+      0
+    );
 
     // Update vertex elevations for seamless terrain
     const nextStripIndex = stripIndex + 1;
