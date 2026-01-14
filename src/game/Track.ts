@@ -1,3 +1,5 @@
+/** @format */
+
 export interface TrackStrip {
   index: number;
   curve: number; // Horizontal curve: -1 (left) to 1 (right), 0 = straight
@@ -31,8 +33,8 @@ export class Track {
 
     return {
       index,
-      curve,
-      hill,
+      curve: 0,
+      hill: 0,
       width: 30,
     };
   }
@@ -70,13 +72,16 @@ export class Track {
    * @param lateralOffset - Distance from road edge (0 = near road, larger = farther)
    * @returns Y elevation offset for the terrain
    */
-  public getLandscapeElevation(stripIndex: number, lateralOffset: number): number {
+  public getLandscapeElevation(
+    stripIndex: number,
+    lateralOffset: number
+  ): number {
     // Combine sine waves for natural-looking hills
     // Different frequencies create varied terrain
     return (
-      Math.sin(stripIndex * 0.03 + lateralOffset * 0.01) * 5 + // Large rolling hills
-      Math.sin(stripIndex * 0.07 - lateralOffset * 0.02) * 2.5 + // Medium undulation
-      Math.sin(lateralOffset * 0.005) * 3 // Hills that vary with distance from road
+      Math.sin(stripIndex * 0.03 + lateralOffset * 0.01) * 50 + // Large rolling hills
+      Math.sin(stripIndex * 0.07 - lateralOffset * 0.02) * 20.5 + // Medium undulation
+      Math.sin(lateralOffset * 0.005) * 30 // Hills that vary with distance from road
     );
   }
 }

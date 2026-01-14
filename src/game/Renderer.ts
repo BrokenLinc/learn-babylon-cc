@@ -224,20 +224,39 @@ export class Renderer {
 
   /**
    * Update landscape mesh vertex elevations for seamless terrain.
-   * Front row uses current strip's elevations, rear row uses next strip's
-   * to ensure adjacent strips connect seamlessly.
+   * Accounts for strip rotation transforms to ensure adjacent strips connect seamlessly.
+   *
+   * The key insight: each strip has a different tilt angle (rotation around X).
+   * This rotation mixes local Y and Z: worldY = localY * cos(tilt) + localZ * stretch * sin(tilt)
+   * To make rear of strip N meet front of strip N+1, we must compute local Y values
+   * that result in matching world Y positions after their respective transforms.
    */
   private updateLandscapeElevations(
     mesh: Mesh,
     stripIndex: number,
     nextStripIndex: number,
-    isLeftSide: boolean
+    isLeftSide: boolean,
+    // Current strip transform parameters
+    tiltAngle: number,
+    stretchFactor: number,
+    stripY: number,
+    // Next strip transform parameters (for rear row alignment)
+    nextTiltAngle: number,
+    nextStretchFactor: number,
+    nextStripY: number
   ): void {
     const positions = mesh.getVerticesData(VertexBuffer.PositionKind);
     if (!positions) return;
 
     const verticesPerRow = this.landscapeSegments + 1; // 5 vertices
     const elevationScale = 5; // 5x intensity for visible hills
+    const halfDepth = this.stripDepth / 2;
+
+    // Precompute trig values
+    const cosTilt = Math.cos(tiltAngle);
+    const sinTilt = Math.sin(tiltAngle);
+    const cosNextTilt = Math.cos(nextTiltAngle);
+    const sinNextTilt = Math.sin(nextTiltAngle);
 
     for (let i = 0; i < verticesPerRow; i++) {
       const t = i / this.landscapeSegments;
@@ -247,19 +266,45 @@ export class Renderer {
       const blendFactor = isLeftSide ? 1 - t : t;
       const lateralOffset = blendFactor * this.landscapeWidth;
 
-      // Front row elevation (current strip)
-      const frontY =
+      // Get desired landscape elevations (height above road surface)
+      const frontLandscapeElev =
         this.track.getLandscapeElevation(stripIndex, lateralOffset) *
         elevationScale *
         blendFactor;
-      positions[i * 3 + 1] = frontY;
-
-      // Rear row elevation (next strip's front = seamless connection)
-      const rearY =
+      const rearLandscapeElev =
         this.track.getLandscapeElevation(nextStripIndex, lateralOffset) *
         elevationScale *
         blendFactor;
-      positions[(i + verticesPerRow) * 3 + 1] = rearY;
+
+      // FRONT ROW (localZ = -halfDepth):
+      // We want the vertex to appear at frontLandscapeElev above the road surface.
+      // After rotation: worldY = localY * cos(tilt) + (-halfDepth * stretch) * sin(tilt)
+      // The road surface at front edge is at: 0 * cos(tilt) + (-halfDepth * stretch) * sin(tilt) = -halfDepth * stretch * sin(tilt)
+      // For landscape to be frontLandscapeElev above road:
+      //   localY * cos(tilt) - halfDepth * stretch * sin(tilt) = -halfDepth * stretch * sin(tilt) + frontLandscapeElev
+      //   localY * cos(tilt) = frontLandscapeElev
+      //   localY = frontLandscapeElev / cos(tilt)
+      const localY_front = frontLandscapeElev / cosTilt;
+      positions[i * 3 + 1] = localY_front;
+
+      // REAR ROW (localZ = +halfDepth):
+      // Must match the world position of the NEXT strip's front row.
+      // Next strip front row (at localZ = -halfDepth) with landscape elevation rearLandscapeElev:
+      //   localY_nextFront = rearLandscapeElev / cos(nextTilt)
+      //   worldY_nextFront = localY_nextFront * cos(nextTilt) - halfDepth * nextStretch * sin(nextTilt) + nextStripY
+      //                    = rearLandscapeElev - halfDepth * nextStretch * sin(nextTilt) + nextStripY
+      //
+      // For this strip's rear to match:
+      //   localY_rear * cos(tilt) + halfDepth * stretch * sin(tilt) + stripY = worldY_nextFront
+      //   localY_rear = (worldY_nextFront - stripY - halfDepth * stretch * sin(tilt)) / cos(tilt)
+      const worldY_nextFront =
+        rearLandscapeElev -
+        halfDepth * nextStretchFactor * sinNextTilt +
+        nextStripY;
+      const localY_rear =
+        (worldY_nextFront - stripY - halfDepth * stretchFactor * sinTilt) /
+        cosTilt;
+      positions[(i + verticesPerRow) * 3 + 1] = localY_rear;
     }
 
     mesh.updateVerticesData(VertexBuffer.PositionKind, positions);
@@ -271,7 +316,15 @@ export class Renderer {
   private updateGroupChildren(
     group: StripGroup,
     strip: { width: number },
-    stripIndex: number
+    stripIndex: number,
+    // Current strip transform params (for landscape elevation correction)
+    tiltAngle: number,
+    stretchFactor: number,
+    stripY: number,
+    // Next strip transform params (for rear row alignment)
+    nextTiltAngle: number,
+    nextStretchFactor: number,
+    nextStripY: number
   ): void {
     // Road: scale X based on strip width
     group.road.scaling.x = strip.width / 50;
@@ -291,8 +344,30 @@ export class Renderer {
 
     // Update vertex elevations for seamless terrain
     const nextStripIndex = stripIndex + 1;
-    this.updateLandscapeElevations(group.leftLandscape, stripIndex, nextStripIndex, true);
-    this.updateLandscapeElevations(group.rightLandscape, stripIndex, nextStripIndex, false);
+    this.updateLandscapeElevations(
+      group.leftLandscape,
+      stripIndex,
+      nextStripIndex,
+      true,
+      tiltAngle,
+      stretchFactor,
+      stripY,
+      nextTiltAngle,
+      nextStretchFactor,
+      nextStripY
+    );
+    this.updateLandscapeElevations(
+      group.rightLandscape,
+      stripIndex,
+      nextStripIndex,
+      false,
+      tiltAngle,
+      stretchFactor,
+      stripY,
+      nextTiltAngle,
+      nextStretchFactor,
+      nextStripY
+    );
 
     // Update materials
     group.road.material = this.stripMaterials[stripIndex % 2];
@@ -442,6 +517,27 @@ export class Renderer {
         Math.sin(tiltAngle) * stretchFactor * (this.stripDepth / 2);
       const stripY = stripElevation - playerElevation + pivotCompensation;
 
+      // Compute NEXT strip's transform parameters for landscape alignment
+      // For backward strips, "next" means one step closer to player (behindStripIndex + 1)
+      const nextStripIndex = behindStripIndex + 1;
+      const nextStrip = this.track.getStrip(nextStripIndex);
+      const nextElevationChange = nextStrip
+        ? nextStrip.hill * elevationScale
+        : 0;
+      const nextTiltAngle = Math.atan2(nextElevationChange, this.stripDepth);
+      const nextStretchFactor =
+        Math.sqrt(
+          this.stripDepth * this.stripDepth +
+            nextElevationChange * nextElevationChange
+        ) / this.stripDepth;
+      const nextPivotCompensation =
+        Math.sin(nextTiltAngle) * nextStretchFactor * (this.stripDepth / 2);
+      // Next strip's elevation: if i=0, it's cumulativeElevation; otherwise backwardElevationData[i-1]
+      const nextStripElevation =
+        i === 0 ? cumulativeElevation : backwardElevationData[i - 1];
+      const nextStripY =
+        nextStripElevation - playerElevation + nextPivotCompensation;
+
       // Apply single transform to group root
       this.applyGroupTransform(
         group,
@@ -452,7 +548,17 @@ export class Renderer {
       );
 
       // Update child positions and materials
-      this.updateGroupChildren(group, strip, behindStripIndex);
+      this.updateGroupChildren(
+        group,
+        strip,
+        behindStripIndex,
+        tiltAngle,
+        stretchFactor,
+        stripY,
+        nextTiltAngle,
+        nextStretchFactor,
+        nextStripY
+      );
     }
 
     for (let i = 0; i < this.visibleStrips; i++) {
@@ -491,6 +597,23 @@ export class Renderer {
         Math.sin(tiltAngle) * stretchFactor * (this.stripDepth / 2);
       const stripY = cumulativeElevation - playerElevation + pivotCompensation;
 
+      // Compute NEXT strip's transform parameters for landscape alignment
+      const nextStrip = this.track.getStrip(stripIndex + 1);
+      const nextElevationChange = nextStrip
+        ? nextStrip.hill * elevationScale
+        : 0;
+      const nextTiltAngle = Math.atan2(nextElevationChange, this.stripDepth);
+      const nextStretchFactor =
+        Math.sqrt(
+          this.stripDepth * this.stripDepth +
+            nextElevationChange * nextElevationChange
+        ) / this.stripDepth;
+      const nextPivotCompensation =
+        Math.sin(nextTiltAngle) * nextStretchFactor * (this.stripDepth / 2);
+      const nextCumulativeElevation = cumulativeElevation + elevationChange;
+      const nextStripY =
+        nextCumulativeElevation - playerElevation + nextPivotCompensation;
+
       // Apply single transform to group root
       this.applyGroupTransform(
         group,
@@ -501,7 +624,17 @@ export class Renderer {
       );
 
       // Update child positions and materials
-      this.updateGroupChildren(group, strip, stripIndex);
+      this.updateGroupChildren(
+        group,
+        strip,
+        stripIndex,
+        tiltAngle,
+        stretchFactor,
+        stripY,
+        nextTiltAngle,
+        nextStretchFactor,
+        nextStripY
+      );
 
       // Accumulate for next strip
       cumulativeElevation += elevationChange;
