@@ -36,8 +36,8 @@ export class Game {
     // Configure distance fog to fade distant strips into the background
     this.scene.fogMode = Scene.FOGMODE_LINEAR;
     this.scene.fogColor = new Color3(0.02, 0.0, 0.04); // Match clearColor
-    this.scene.fogStart = 1900; // Start fading ~40 strips ahead
-    this.scene.fogEnd = 3800; // Fully fogged at ~80 strips
+    this.scene.fogStart = 2 * 40; // Start fading ~40 strips ahead
+    this.scene.fogEnd = 96 * 40; // Fully fogged at ~80 strips
 
     // Create cameras
     this.setupCameras();

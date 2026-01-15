@@ -102,11 +102,11 @@ export class Renderer {
       "headlight",
       new Vector3(0, 8, 0), // Position above player
       new Vector3(0, -0.1, 1), // Direction: slightly down, forward
-      Math.PI / 6, // Angle: 60 degrees cone
-      2, // Exponent: how focused the light is
+      Math.PI, // Angle: 60 degrees cone
+      120, // Exponent: how focused the light is
       this.scene
     );
-    headlight.intensity = 2;
+    headlight.intensity = 100;
     headlight.diffuse = new Color3(1, 0.95, 0.8); // Warm white
     headlight.range = 800; // How far the light reaches
     return headlight;
@@ -155,7 +155,7 @@ export class Renderer {
     landscapeMat2.diffuseTexture = dirtTexture2;
     landscapeMat2.diffuseColor = this.landscapeColor2;
     landscapeMat2.specularColor = Color3.Black();
-    this.landscapeMaterials = [landscapeMat1, landscapeMat2];
+    this.landscapeMaterials = [landscapeMat1, landscapeMat1];
 
     // Create tree materials (9 sprites × 3 tints = 27 total)
     const tints = [
