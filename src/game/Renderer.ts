@@ -1,6 +1,7 @@
 /** @format */
 
 import { VertexBuffer } from "@babylonjs/core/Buffers/buffer";
+import { SpotLight } from "@babylonjs/core/Lights/spotLight";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
@@ -8,6 +9,7 @@ import { Matrix, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { Scene } from "@babylonjs/core/scene";
+import dirtTextureUrl from "../assets/dirt-1.png";
 import pine1Url from "../assets/pine-1.png";
 import pine2Url from "../assets/pine-2.png";
 import pine3Url from "../assets/pine-3.png";
@@ -64,6 +66,7 @@ export class Renderer {
   private landscapeMaterials: StandardMaterial[] = [];
   private treeMaterials: StandardMaterial[] = [];
   private playerMesh: Mesh;
+  private headlight: SpotLight;
 
   private readonly visibleStrips = 80; // Number of strips to render ahead
   private readonly backwardStrips = 3; // Number of strips to render behind player
@@ -90,6 +93,23 @@ export class Renderer {
   constructor(private scene: Scene, private track: Track) {
     this.createStripGroups();
     this.playerMesh = this.createPlayerMesh();
+    this.headlight = this.createHeadlight();
+  }
+
+  private createHeadlight(): SpotLight {
+    // Create a spotlight as headlight, shining down the track
+    const headlight = new SpotLight(
+      "headlight",
+      new Vector3(0, 8, 0), // Position above player
+      new Vector3(0, -0.1, 1), // Direction: slightly down, forward
+      Math.PI / 6, // Angle: 60 degrees cone
+      2, // Exponent: how focused the light is
+      this.scene
+    );
+    headlight.intensity = 2;
+    headlight.diffuse = new Color3(1, 0.95, 0.8); // Warm white
+    headlight.range = 800; // How far the light reaches
+    return headlight;
   }
 
   private createStripGroups(): void {
@@ -117,12 +137,22 @@ export class Renderer {
     curbMat2.specularColor = Color3.Black();
     this.curbMaterials = [curbMat2, curbMat2];
 
-    // Create landscape materials
+    // Create landscape materials with dirt texture
+    const dirtTexture1 = new Texture(dirtTextureUrl, this.scene);
+    dirtTexture1.uScale = 20; // Tile texture across landscape
+    dirtTexture1.vScale = 1;
+
     const landscapeMat1 = new StandardMaterial("landscapeMat1", this.scene);
+    landscapeMat1.diffuseTexture = dirtTexture1;
     landscapeMat1.diffuseColor = this.landscapeColor1;
     landscapeMat1.specularColor = Color3.Black();
 
+    const dirtTexture2 = new Texture(dirtTextureUrl, this.scene);
+    dirtTexture2.uScale = 20;
+    dirtTexture2.vScale = 1;
+
     const landscapeMat2 = new StandardMaterial("landscapeMat2", this.scene);
+    landscapeMat2.diffuseTexture = dirtTexture2;
     landscapeMat2.diffuseColor = this.landscapeColor2;
     landscapeMat2.specularColor = Color3.Black();
     this.landscapeMaterials = [landscapeMat1, landscapeMat2];
@@ -858,5 +888,6 @@ export class Renderer {
     this.landscapeMaterials.forEach((mat) => mat.dispose());
     this.treeMaterials.forEach((mat) => mat.dispose());
     this.playerMesh.dispose();
+    this.headlight.dispose();
   }
 }
