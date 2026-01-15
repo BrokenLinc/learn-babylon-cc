@@ -8,9 +8,43 @@ import { Matrix, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { Scene } from "@babylonjs/core/scene";
+import pine1Url from "../assets/pine-1.png";
+import pine2Url from "../assets/pine-2.png";
+import pine3Url from "../assets/pine-3.png";
+import pine4Url from "../assets/pine-4.png";
+import pine5Url from "../assets/pine-5.png";
+import pine6Url from "../assets/pine-6.png";
+import pine7Url from "../assets/pine-7.png";
+import pine8Url from "../assets/pine-8.png";
+import pine9Url from "../assets/pine-9.png";
 import roadTextureUrl from "../assets/road.jpg";
 import { Player } from "./Player";
 import { Track } from "./Track";
+
+const pineUrls = [
+  pine1Url,
+  pine2Url,
+  pine3Url,
+  pine4Url,
+  pine5Url,
+  pine6Url,
+  pine7Url,
+  pine8Url,
+  pine9Url,
+];
+
+// Sprite dimensions [width, height] - matching source PNGs
+const pineSizes: [number, number][] = [
+  [130, 249], // pine-1
+  [91, 234], // pine-2
+  [98, 204], // pine-3
+  [98, 177], // pine-4
+  [98, 248], // pine-5
+  [69, 221], // pine-6
+  [64, 243], // pine-7
+  [43, 31], // pine-8 (small bush)
+  [32, 21], // pine-9 (tiny bush)
+];
 
 interface StripGroup {
   root: Mesh; // Invisible parent with shear transform
@@ -19,6 +53,8 @@ interface StripGroup {
   rightCurb: Mesh; // Child with X offset
   leftLandscape: Mesh; // Single mesh with modifiable vertices
   rightLandscape: Mesh; // Single mesh with modifiable vertices
+  leftTrees: Mesh[]; // Tree billboard sprites on left
+  rightTrees: Mesh[]; // Tree billboard sprites on right
 }
 
 export class Renderer {
@@ -26,6 +62,7 @@ export class Renderer {
   private stripMaterials: StandardMaterial[] = [];
   private curbMaterials: StandardMaterial[] = [];
   private landscapeMaterials: StandardMaterial[] = [];
+  private treeMaterials: StandardMaterial[] = [];
   private playerMesh: Mesh;
 
   private readonly visibleStrips = 80; // Number of strips to render ahead
@@ -43,6 +80,12 @@ export class Renderer {
   private readonly landscapeSegments = 34; // Creates 5 vertices across
   private readonly landscapeColor1 = new Color3(0.3, 0.5, 0.2);
   private readonly landscapeColor2 = new Color3(0.4, 0.6, 0.3);
+
+  // Tree configuration
+  private readonly treesPerSide = 6; // Trees per strip side
+  private readonly treeBaseWidth = 40; // Base sprite width
+  private readonly treeBaseHeight = 60; // Base sprite height
+  private readonly treeMinDistance = 20; // Min distance from road edge
 
   constructor(private scene: Scene, private track: Track) {
     this.createStripGroups();
@@ -83,6 +126,29 @@ export class Renderer {
     landscapeMat2.diffuseColor = this.landscapeColor2;
     landscapeMat2.specularColor = Color3.Black();
     this.landscapeMaterials = [landscapeMat1, landscapeMat2];
+
+    // Create tree materials (9 sprites × 3 tints = 27 total)
+    const tints = [
+      new Color3(1.0, 1.0, 1.0), // Normal
+      new Color3(0.85, 0.95, 0.85), // Slightly blue-green
+      new Color3(1.0, 0.95, 0.9), // Slightly warm
+    ];
+    for (let spriteIdx = 0; spriteIdx < 7; spriteIdx++) {
+      for (let tintIdx = 0; tintIdx < tints.length; tintIdx++) {
+        const mat = new StandardMaterial(
+          `treeMat_${spriteIdx}_${tintIdx}`,
+          this.scene
+        );
+        const tex = new Texture(pineUrls[spriteIdx], this.scene);
+        tex.hasAlpha = true;
+        mat.diffuseTexture = tex;
+        mat.useAlphaFromDiffuseTexture = true;
+        mat.diffuseColor = tints[tintIdx];
+        mat.specularColor = Color3.Black();
+        mat.backFaceCulling = false;
+        this.treeMaterials.push(mat);
+      }
+    }
 
     // Create strip groups (forward + backward)
     const totalStrips = this.visibleStrips + this.backwardStrips;
@@ -152,6 +218,31 @@ export class Renderer {
       rightLandscape.parent = root;
       rightLandscape.material = this.landscapeMaterials[i % 2];
 
+      // Tree meshes - billboard sprites on each side
+      const leftTrees: Mesh[] = [];
+      const rightTrees: Mesh[] = [];
+      for (let t = 0; t < this.treesPerSide; t++) {
+        const leftTree = MeshBuilder.CreatePlane(
+          `leftTree_${i}_${t}`,
+          { width: this.treeBaseWidth, height: this.treeBaseHeight },
+          this.scene
+        );
+        leftTree.parent = root;
+        leftTree.billboardMode = Mesh.BILLBOARDMODE_Y;
+        leftTree.material = this.treeMaterials[0]; // Default, updated per frame
+        leftTrees.push(leftTree);
+
+        const rightTree = MeshBuilder.CreatePlane(
+          `rightTree_${i}_${t}`,
+          { width: this.treeBaseWidth, height: this.treeBaseHeight },
+          this.scene
+        );
+        rightTree.parent = root;
+        rightTree.billboardMode = Mesh.BILLBOARDMODE_Y;
+        rightTree.material = this.treeMaterials[0]; // Default, updated per frame
+        rightTrees.push(rightTree);
+      }
+
       this.stripGroups.push({
         root,
         road,
@@ -159,6 +250,8 @@ export class Renderer {
         rightCurb,
         leftLandscape,
         rightLandscape,
+        leftTrees,
+        rightTrees,
       });
     }
   }
@@ -315,6 +408,93 @@ export class Renderer {
   }
 
   /**
+   * Simple hash function for deterministic pseudo-random values.
+   * Same stripIndex and slot always produces the same result.
+   */
+  private hashPosition(stripIndex: number, slot: number): number {
+    const seed = stripIndex * 1000 + slot;
+    let hash = Math.imul(seed, 2654435761);
+    hash = Math.imul((hash >>> 16) ^ hash, 2654435761);
+    hash = (hash >>> 16) ^ hash;
+    return (hash >>> 0) / 0xffffffff; // 0 to 1
+  }
+
+  /**
+   * Update tree positions and visibility for a strip.
+   * Uses deterministic noise for natural clustering.
+   */
+  private updateTrees(
+    trees: Mesh[],
+    stripIndex: number,
+    isLeftSide: boolean,
+    curbEdge: number
+  ): void {
+    const worldScale = 0.5; // Scale factor to convert pixel dimensions to world units
+
+    for (let t = 0; t < trees.length; t++) {
+      const tree = trees[t];
+
+      // Deterministic position based on strip and slot
+      const hash = this.hashPosition(stripIndex, t + (isLeftSide ? 0 : 100));
+
+      // Density check - creates gaps and clusters
+      const clusterNoise = Math.sin(stripIndex * 0.15 + t * 0.5) * 0.5 + 0.5;
+      if (hash > clusterNoise * 0.8) {
+        tree.setEnabled(false);
+        continue;
+      }
+      tree.setEnabled(true);
+
+      // Select sprite type (0-8) based on hash
+      const hash3 = this.hashPosition(stripIndex + 1000, t);
+      const spriteIndex = Math.floor(hash3 * 7);
+      const [spriteWidth, spriteHeight] = pineSizes[spriteIndex];
+
+      // Select tint (0-2) based on another hash
+      const hash5 = this.hashPosition(stripIndex + 2000, t);
+      const tintIndex = Math.floor(hash5 * 3);
+      const materialIndex = spriteIndex * 3 + tintIndex;
+      tree.material = this.treeMaterials[materialIndex];
+
+      // Size variation (0.8 to 1.2)
+      const sizeVariation = 0.8 + hash3 * 0.4;
+      const scaledWidth = spriteWidth * worldScale * sizeVariation;
+      const scaledHeight = spriteHeight * worldScale * sizeVariation;
+
+      // X position: spread across landscape width
+      const lateralOffset =
+        this.treeMinDistance +
+        hash * (this.landscapeWidth - this.treeMinDistance * 2);
+      const xPos = isLeftSide
+        ? curbEdge - lateralOffset
+        : curbEdge + lateralOffset;
+
+      // Z position: vary within strip depth
+      const hash2 = this.hashPosition(stripIndex + 500, t);
+      const zOffset = (hash2 - 0.5) * this.stripDepth * 0.8;
+
+      // Y position: match landscape elevation, anchor at bottom center
+      const elevation =
+        this.track.getLandscapeElevation(stripIndex, lateralOffset) * 5; // 5x scale
+      const blendFactor = lateralOffset / this.landscapeWidth;
+      const yPos = elevation * blendFactor + scaledHeight / 2; // Offset by half height for bottom anchor
+
+      tree.position.set(xPos, yPos, zOffset);
+
+      // Horizontal flip via negative X scale
+      const hash4 = this.hashPosition(stripIndex + 1500, t);
+      const flipX = hash4 > 0.5 ? 1 : -1;
+
+      // Scale to match sprite dimensions (base mesh is 40x60, so we need to adjust)
+      tree.scaling.set(
+        (flipX * scaledWidth) / this.treeBaseWidth,
+        scaledHeight / this.treeBaseHeight,
+        1
+      );
+    }
+  }
+
+  /**
    * Update child local positions within a strip group.
    */
   private updateGroupChildren(
@@ -383,6 +563,10 @@ export class Renderer {
     group.rightCurb.material = this.curbMaterials[stripIndex % 2];
     group.leftLandscape.material = this.landscapeMaterials[stripIndex % 2];
     group.rightLandscape.material = this.landscapeMaterials[stripIndex % 2];
+
+    // Update trees
+    this.updateTrees(group.leftTrees, stripIndex, true, leftCurbEdge);
+    this.updateTrees(group.rightTrees, stripIndex, false, rightCurbEdge);
   }
 
   public update(player: Player): void {
@@ -666,10 +850,13 @@ export class Renderer {
       group.rightCurb.dispose();
       group.leftLandscape.dispose();
       group.rightLandscape.dispose();
+      group.leftTrees.forEach((tree) => tree.dispose());
+      group.rightTrees.forEach((tree) => tree.dispose());
     });
     this.stripMaterials.forEach((mat) => mat.dispose());
     this.curbMaterials.forEach((mat) => mat.dispose());
     this.landscapeMaterials.forEach((mat) => mat.dispose());
+    this.treeMaterials.forEach((mat) => mat.dispose());
     this.playerMesh.dispose();
   }
 }
