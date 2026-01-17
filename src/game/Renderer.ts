@@ -10,6 +10,7 @@ import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { Scene } from "@babylonjs/core/scene";
 import dirtTextureUrl from "../assets/dirt-1.png";
+import riderTextureUrl from "../assets/rider-1.png";
 import pine1Url from "../assets/pine-1.png";
 import pine2Url from "../assets/pine-2.png";
 import pine3Url from "../assets/pine-3.png";
@@ -287,15 +288,27 @@ export class Renderer {
   }
 
   private createPlayerMesh(): Mesh {
-    // Motorbike-shaped bounding box: thin and tall
-    const player = MeshBuilder.CreateBox(
+    // Rider sprite dimensions: 200x350 pixels
+    // Target height: 7 units (matching original player box)
+    const spriteHeight = 350;
+    const spriteWidth = 200;
+    const targetHeight = 7;
+    const targetWidth = targetHeight * (spriteWidth / spriteHeight);
+
+    const player = MeshBuilder.CreatePlane(
       "player",
-      { width: 3, height: 7, depth: 0.1 },
+      { width: targetWidth, height: targetHeight },
       this.scene
     );
+    player.billboardMode = Mesh.BILLBOARDMODE_Y;
+
     const mat = new StandardMaterial("playerMat", this.scene);
-    mat.diffuseColor = new Color3(0, 0.5, 1);
+    const tex = new Texture(riderTextureUrl, this.scene);
+    tex.hasAlpha = true;
+    mat.diffuseTexture = tex;
+    mat.useAlphaFromDiffuseTexture = true;
     mat.specularColor = Color3.Black();
+    mat.backFaceCulling = false;
     player.material = mat;
     return player;
   }
@@ -393,11 +406,13 @@ export class Renderer {
       const frontLandscapeElev =
         this.track.getLandscapeElevation(stripIndex, lateralOffset) *
         elevationScale *
-        blendFactor;
+        blendFactor *
+        (isLeftSide ? 1 : -1);
       const rearLandscapeElev =
         this.track.getLandscapeElevation(nextStripIndex, lateralOffset) *
         elevationScale *
-        blendFactor;
+        blendFactor *
+        (isLeftSide ? 1 : -1);
 
       // Babylon.js CreateGround vertex order is BACK-TO-FRONT:
       // - Row 0 (indices 0-4): Z = +halfDepth → REAR (further from player)
@@ -507,7 +522,8 @@ export class Renderer {
       const elevation =
         this.track.getLandscapeElevation(stripIndex, lateralOffset) * 5; // 5x scale
       const blendFactor = lateralOffset / this.landscapeWidth;
-      const yPos = elevation * blendFactor + scaledHeight / 2; // Offset by half height for bottom anchor
+      const yPos =
+        elevation * blendFactor * (isLeftSide ? 1 : -1) + scaledHeight / 2; // Offset by half height for bottom anchor
 
       tree.position.set(xPos, yPos, zOffset);
 
@@ -868,7 +884,7 @@ export class Renderer {
 
     // Player mesh stays at fixed screen position (centered)
     this.playerMesh.position.x = 0;
-    this.playerMesh.position.y = 0.5;
+    this.playerMesh.position.y = 3.5; // Half of sprite height (7/2) to anchor at ground
     this.playerMesh.position.z = -this.stripDepth / 2;
   }
 

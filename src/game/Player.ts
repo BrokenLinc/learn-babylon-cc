@@ -3,7 +3,7 @@
 import { Track } from "./Track";
 
 export class Player {
-  public distance: number = 0; // Distance traveled down the track
+  public distance: number = 5; // Distance traveled down the track
   public velocity: number = 0; // Current speed (units per second)
   public xOffset: number = 0; // Lateral position (-1 to 1, where ~0.5 is road edge)
   private steerVelocity: number = 0; // Current steering momentum (-1 to 1)

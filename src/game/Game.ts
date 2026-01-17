@@ -29,7 +29,7 @@ export class Game {
 
     // Initialize BabylonJS engine (no antialiasing for retro look)
     this.engine = new Engine(canvas);
-    // this.engine.setHardwareScalingLevel(4);
+    this.engine.setHardwareScalingLevel(2);
     this.scene = new Scene(this.engine);
     this.scene.clearColor = new Color4(0.02, 0.0, 0.04, 1); // Sky blue
 
@@ -112,7 +112,7 @@ export class Game {
       new Vector3(0, 1, 0),
       this.scene
     );
-    light.intensity = 0.1; // Dim ambient for night atmosphere
+    light.intensity = 0.8; // Dim ambient for night atmosphere
   }
 
   public start(): void {
